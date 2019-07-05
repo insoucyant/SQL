@@ -1,0 +1,32 @@
+--**************************************************************************************
+--******************************        RDS FILE      *******************************
+--**************************************************************************************
+--********************************************************************************************************
+--***********************************		models_data		  ********************************************
+--********************************************************************************************************
+
+-- First create the model_data table using R 
+--SELECT * from models_data Top 20;
+
+DROP TABLE IF EXISTS models_data3;
+CREATE TABLE models_data3
+AS
+SELECT 
+forecasted_year_month
+	, (actual_price)
+	, model 
+	, variables 
+	, (forecast)
+	, (error)
+	, (absolute_percentage_error)
+FROM 
+models_data;
+
+DROP TABLE IF EXISTS md_201X;
+CREATE TABLE md_201X
+AS
+SELECT * from models_data3 where SUBSTRING(forecasted_year_month, 1,3) in ('201');
+
+-- SELECT * FROM md_201X;
+-- SELECT DISTINCT SUBSTRING(forecasted_year_month, 1,4) from md_201X ORDER BY 1;
+

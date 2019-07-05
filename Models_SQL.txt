@@ -1,0 +1,115 @@
+--************************************************************************************--
+-- Two Input Files Required:
+--      1 --> Models_7Levels.csv. # This file contains the month, actual price, model name, forecast price, error and absolute_percentage_error
+--		2 --> MatchedTimeframes_24MonthsVariance.csv 
+--				# The second file is output from R code. It contains the month for which DNA match is done. The top 5 matched time frame, the match was done on the basis of how many months of variance, the cluster to which it belongs.
+
+-- The output table is:
+--            Top25_2years
+-- The only change in moving from 24 months to either of : 3 months, 6 months, 12 months is to change the number in R code and the final table name.
+-- A total of two changes.
+
+--************************************************************************************--
+--SELECT version();
+-- All the models with their MAPE for each time period
+DROP TABLE IF EXISTS Models_7Levels;
+CREATE TABLE Models_7Levels ( Sno serial,
+ Month VARCHAR(20), 
+ Forecast_date DATE, 
+ Actual_Price real, 
+ Model VARCHAR(255),
+ Forecast_Price real,
+ Error real,
+ Absolute_Percentage_Error real)
+-----------------------------------------------------
+COPY Models_7Levels(Sno, Month, Forecast_date, Actual_Price, Model, Forecast_Price, Error, Absolute_Percentage_Error) 
+FROM 'D:\Sumit\WORK\Eltsen\Data\Models_7Levels.csv' DELIMITER ',' CSV HEADER;
+SELECT * FROM Models_7levels LIMIT 10;
+--**************************************************************************************
+	
+-- TABLE CREATION for TOP 5 models for any time	
+DROP TABLE IF EXISTS Top_5;
+CREATE TABLE Top_5 (
+	month VARCHAR(20)
+	, model VARCHAR(255)
+	, absolute_percentage_error real
+	, rank INT
+	, tyear VARCHAR(20)
+	,tmonth VARCHAR(20)
+	,tjoin VARCHAR(20)
+);
+-- DATA INSERTION
+INSERT INTO Top_5(month, model, absolute_percentage_error, rank)
+SELECT rank_filter.month, rank_filter.model, rank_filter.absolute_percentage_error, rank_filter.rank FROM (
+        SELECT Models_7Levels.*, 
+        rank() OVER (
+            PARTITION BY month
+            ORDER BY absolute_percentage_error DESC
+        )
+        FROM Models_7Levels
+        --WHERE Models_7Levels.month = '1990-01'
+    ) rank_filter WHERE RANK < 6
+	
+-- CHECK whether data inserted or not
+SELECT * from Top_5 LIMIT 20;
+UPDATE Top_5
+SET tyear = SUBSTRING(month, 1,4), tmonth = SUBSTRING(month, 6,7);
+UPDATE Top_5
+SET tjoin = concat(tyear, tmonth);
+SELECT SUBSTRING(month, 1,4) AS year from Top_5; 
+------------------------------------------------------
+--**************************************************************************************
+--******************************        SECOND FILE      *******************************
+--**************************************************************************************
+DROP TABLE IF EXISTS MatchedTimeframes_24MonthsVariance;
+-------------
+CREATE TABLE MatchedTimeframes_24MonthsVariance(	
+Sno serial	
+,Gr integer	
+,NumMo integer
+,YEARMONTH VARCHAR(20)	
+,matched_timeframe_1	VARCHAR(20)	
+,matched_timeframe_2	VARCHAR(20)	
+,matched_timeframe_3	VARCHAR(20)	
+,matched_timeframe_4	VARCHAR(20)	
+,matched_timeframe_5    VARCHAR(20));
+----------------
+COPY MatchedTimeframes_24MonthsVariance(
+Sno, Gr, NumMo, YEARMONTH,
+matched_timeframe_1, matched_timeframe_2, matched_timeframe_3, matched_timeframe_4, matched_timeframe_5)
+FROM 'D:\Sumit\WORK\Eltsen\MatchedTimeframes_24MonthsVariance.csv' DELIMITER ',' CSV HEADER;
+----------------
+SELECT * from MatchedTimeframes_24MonthsVariance LIMIT 10;
+------------------------------------------------------ PIVOT
+-- Pivot the Time DNA Match Table MatchedTimeframes_24MonthsVariance;
+DROP TABLE IF EXISTS TIMEDNA_pivoted;
+---------------------
+CREATE TABLE TIMEDNA_pivoted(sno, gr,NumMo, yearmonth, match_rank, match_time)
+AS
+SELECT sno, gr,NumMo, yearmonth, 'T1' , matched_timeframe_1 from MatchedTimeframes_24MonthsVariance
+UNION ALL
+SELECT sno, gr,NumMo, yearmonth, 'T2' , matched_timeframe_2 from MatchedTimeframes_24MonthsVariance
+UNION ALL
+SELECT sno, gr,NumMo, yearmonth, 'T3' , matched_timeframe_3 from MatchedTimeframes_24MonthsVariance
+UNION ALL
+SELECT sno, gr,NumMo, yearmonth, 'T4' , matched_timeframe_4 from MatchedTimeframes_24MonthsVariance
+UNION ALL
+SELECT sno, gr,NumMo, yearmonth, 'T5' , matched_timeframe_5 from MatchedTimeframes_24MonthsVariance
+;
+
+SELECT * FROM TIMEDNA_pivoted order by yearmonth, match_rank LIMIT 20;
+--*****************************************************************************************
+--   			JOINING THE TWO - TIMEDNA_pivoted & Top_5
+--*****************************************************************************************
+DROP TABLE IF EXISTS Top25_2years;
+CREATE TABLE Top25_2years
+AS
+SELECT
+ TIMEDNA_pivoted.*,
+ Top_5.model,
+ Top_5.absolute_percentage_error
+FROM
+ TIMEDNA_pivoted 
+LEFT JOIN Top_5 ON TIMEDNA_pivoted.match_time = Top_5.tjoin;
+
+SELECT * FROM Top25_2years;

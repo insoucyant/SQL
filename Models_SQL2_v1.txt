@@ -1,0 +1,231 @@
+--************************************************************************************--
+-- Two Input Files Required:
+--      1 --> Models_7Levels.csv. # This file contains the month, actual price, model name, forecast price, error and absolute_percentage_error
+--		2 --> MatchedTimeframes_24MonthsVariance.csv 
+--				# The second file is output from R code. It contains the month for which DNA match is done. The top 5 matched time frame, the match was done on the basis of how many months of variance, the cluster to which it belongs.
+
+-- The output table is:
+--            Top25_2years
+-- The only change in moving from 24 months to either of : 3 months, 6 months, 12 months is to change the number in R code and the final table name.
+-- A total of two changes.
+
+--************************************************************************************--
+--SELECT version();
+--************************************************************************************--
+------------------------------------------------------
+--**************************************************************************************
+--******************************        DNA FILE      *******************************
+--**************************************************************************************
+DROP TABLE IF EXISTS MatchedTimeframes;
+-------------
+CREATE TABLE MatchedTimeframes(	
+VarianceTimeline int,
+YEARMONTH VARCHAR(20)
+,MatchingTimeFrame VARCHAR(20)
+,SD_Corn_MeanReversed real
+,NCOMM_OI_Percent real
+,SD_Crude_MeanReversed real
+);
+----------------
+COPY MatchedTimeframes(
+VarianceTimeline,YEARMONTH,MatchingTimeFrame, SD_Corn_MeanReversed, NCOMM_OI_Percent, SD_Crude_MeanReversed
+)
+--FROM 'D:\Sumit\WORK\Eltsen\Data\SQL\MatchedTimeframes_Corn.csv' DELIMITER ',' CSV HEADER; ---------------------------------------------
+--FROM 'D:\Sumit\WORK\Eltsen\Data\SQL\MatchedTimeframes_Corn_Crude_FiftyPercent.csv' DELIMITER ',' CSV HEADER; ---------------------------------------------
+--FROM 'D:\Sumit\WORK\Eltsen\Data\SQL\MatchedTimeframes_Corn_Crude_TenPercent.csv' DELIMITER ',' CSV HEADER; ---------------------------------------------
+--FROM 'D:\Sumit\WORK\Eltsen\Data\SQL\MatchedTimeframes_Corn_OI.csv' DELIMITER ',' CSV HEADER; ---------------------------------------------
+FROM 'D:\Sumit\WORK\Eltsen\Data\SQL\MatchedTimeframes_Corn_OI_Crude_FiftyPercent.csv' DELIMITER ',' CSV HEADER; ---------------------------------------------
+----------------
+--SELECT * from MatchedTimeframes LIMIT 10;
+--**************************************************************************************
+--******************************        RDS FILE      *******************************
+--**************************************************************************************
+
+
+DROP TABLE IF EXISTS models_data2;
+CREATE TABLE models_data2
+AS
+SELECT * from models_data where forecasted_year_month IN ( 
+SELECT distinct yearmonth from MatchedTimeframes UNION
+SELECT distinct matchingtimeframe from MatchedTimeframes);
+
+-- SELECT * from models_data2;
+--SELECT "MAPE" from models_data2 
+
+DROP TABLE IF EXISTS models_data3;
+CREATE TABLE models_data3
+AS
+SELECT 
+forecasted_year_month
+	, actual_price 
+	, model 
+	, variables 
+	, forecast
+	, error
+	, "MAPE" 
+FROM 
+models_data2;
+
+ALTER TABLE models_data3 ADD COLUMN absolute_percentage_error REAL;
+UPDATE models_data3
+SET 
+absolute_percentage_error = models_data3."MAPE";
+
+
+DROP TABLE IF EXISTS Top_20;
+CREATE TABLE Top_20 (
+	forecasted_year_month VARCHAR(20)
+	, actual_price real
+	, model VARCHAR(25)
+	, variables VARCHAR(255)
+	, absolute_percentage_error real
+	, rank INT
+);
+
+
+-- DATA INSERTION
+INSERT INTO Top_20(forecasted_year_month, actual_price, model, variables, absolute_percentage_error, rank)
+SELECT rank_filter.forecasted_year_month, rank_filter.actual_price,rank_filter.model,rank_filter.variables, rank_filter.absolute_percentage_error, rank_filter.rank FROM (
+        SELECT models_data3.*, 
+        rank() OVER (
+            PARTITION BY forecasted_year_month
+            ORDER BY absolute_percentage_error DESC
+        )
+        FROM models_data3
+        --WHERE models_data3.
+    ) rank_filter WHERE RANK < 21;
+--**********************		BENCHMARK		  ************************************--
+--************************************************************************************--
+DROP TABLE IF EXISTS benchmark;
+CREATE TABLE benchmark
+AS
+SELECT forecasted_year_month, actual_price, model, variables, forecast,error, absolute_percentage_error AS MAPE
+ FROM models_data3 WHERE variables = 'calculated_benchmark';
+--*************************
+--*******************************
+SELECT * FROM benchmark;
+--************************************************************************************--
+--************************************************************************************--
+--************************************************************************************--
+-- All the models with their MAPE for each time period
+
+------------------------------------------------------
+--**************************************************************************************
+--******************************              *******************************
+--**************************************************************************************
+
+--*****************************************************************************************
+--   			JOINING THE TWO - MatchedTimeframes & Top_20
+--*****************************************************************************************
+DROP TABLE IF EXISTS Top100;
+CREATE TABLE Top100
+AS
+SELECT
+  MatchedTimeframes.yearmonth
+ ,MatchedTimeframes.MatchingTimeFrame
+ ,MatchedTimeframes.VarianceTimeline
+ ,Top_20.model
+ ,Top_20.variables
+-- ,Top_20.absolute_percentage_error
+FROM
+ MatchedTimeframes 
+LEFT JOIN Top_20 ON MatchedTimeframes.yearmonth = Top_20.forecasted_year_month;
+
+--SELECT * FROM Top100 LIMIT 20;
+
+--*****************************************************************************************
+--   			 Does Same Model Exist in two Time Periods
+--*****************************************************************************************
+DROP TABLE IF EXISTS Common_Models;
+CREATE TABLE Common_Models
+AS
+SELECT distinct t1.yearmonth, t1.MatchingTimeFrame AS MatchTF1,t2.MatchingTimeFrame AS MatchTF2, t1.model,t1.variables, t1.VarianceTimeline AS tab1Vartime, t2.VarianceTimeline AS tab2VarTime
+FROM Top100 as t1
+INNER JOIN Top100 as t2
+ON t1.yearmonth = t2.yearmonth 
+AND t1.model = t2.model
+AND t1.VarianceTimeline = t2.VarianceTimeline
+AND t1.MatchingTimeFrame != t2.MatchingTimeFrame
+GROUP BY t1.yearmonth, t1.MatchingTimeFrame,t2.MatchingTimeFrame, t1.model,t1.variables, t1.VarianceTimeline, t2.VarianceTimeline
+ORDER BY t1.yearmonth, t1.MatchingTimeFrame,t2.MatchingTimeFrame, t1.model,t1.variables, t1.VarianceTimeline, t2.VarianceTimeline;
+
+
+--SELECT * FROM Common_Models LIMIT 20;
+--COPY Common_Models TO 'D:\Sumit\WORK\Eltsen\Data\SQL\Common_Models_Corn.csv'
+--COPY Common_Models TO 'D:\Sumit\WORK\Eltsen\Data\SQL\Common_Models_Corn_Crude_FiftyPercent.csv' ------------------------------
+--COPY Common_Models TO 'D:\Sumit\WORK\Eltsen\Data\SQL\Common_Models_Corn_Crude_TenPercent.csv' ------------------------------
+--COPY Common_Models TO 'D:\Sumit\WORK\Eltsen\Data\SQL\Common_Models_Corn_OI.csv' ------------------------------
+COPY Common_Models TO 'D:\Sumit\WORK\Eltsen\Data\SQL\Common_Models_Corn_OI_Crude_FiftyPercent.csv' ------------------------------
+DELIMITER ',' CSV HEADER;
+--SELECT DISTINCT yearmonth, model FROM Common_Models ORDER BY yearmonth; 
+
+DROP TABLE IF EXISTS Dis_Com_Models;
+CREATE TABLE Dis_Com_Models
+AS
+SELECT DISTINCT yearmonth, model, variables FROM Common_Models ORDER BY yearmonth; 
+
+--SELECT * FROM Dis_Com_Models;
+
+--********************************************************************************************************
+DROP TABLE IF EXISTS com_mdls_bcm;
+CREATE TABLE com_mdls_bcm
+AS
+SELECT a.*, b.forecasted_year_month, b.actual_price, b.forecast as benchmark, b.error as bchmrk_error
+, b.mape as bchmrk_mape, (b.error/b.actual_price) as bchmrk_ape
+FROM 
+Dis_Com_Models as a
+INNER JOIN 
+benchmark AS b 
+ON
+a.yearmonth = b.forecasted_year_month;
+
+--SELECT * FROM com_mdls_bcm;
+
+--********************************************************************************************************
+DROP TABLE IF EXISTS mdl_cmprsn;
+CREATE TABLE mdl_cmprsn
+AS
+SELECT a.*, b.actual_price AS mdl_actual_price, b.forecast as mdl_frcst_prc, b.error as mdl_error
+, (b.error/b.actual_price) as mdl_ape 
+FROM 
+com_mdls_bcm AS a
+INNER JOIN
+models_data3 AS b
+ON
+a.yearmonth = b.forecasted_year_month
+AND a.model = b.model
+AND a.variables = b.variables;
+
+
+ALTER TABLE mdl_cmprsn ADD COLUMN mdl_btr REAL;
+UPDATE mdl_cmprsn
+SET 
+mdl_btr = (bchmrk_mape-mdl_ape)/bchmrk_ape;
+
+--SELECT * FROM mdl_cmprsn order by yearmonth;
+
+--COPY mdl_cmprsn TO 'D:\Sumit\WORK\Eltsen\Data\SQL\mdl_cmprsn_Corn.csv' ---------------------------------------
+--COPY mdl_cmprsn TO 'D:\Sumit\WORK\Eltsen\Data\SQL\mdl_cmprsn_Corn_Crude_FiftyPercent.csv' ---------------------------------------
+--COPY mdl_cmprsn TO 'D:\Sumit\WORK\Eltsen\Data\SQL\mdl_cmprsn_Corn_Crude_TenPercent.csv' ---------------------------------------
+--COPY mdl_cmprsn TO 'D:\Sumit\WORK\Eltsen\Data\SQL\mdl_cmprsn_Corn_OI.csv' ---------------------------------------
+COPY mdl_cmprsn TO 'D:\Sumit\WORK\Eltsen\Data\SQL\mdl_cmprsn_Corn_OI_Crude_FiftyPercent.csv' ---------------------------------------
+DELIMITER ',' CSV HEADER;
+
+
+
+
+
+
+
+--************************************************************************************************************
+--						OPERATIONALS
+--************************************************************************************************************
+--select current_database()
+--select user
+--select 'Database : ' ||current_database()||', '||'User : '|| user db_details
+--select format('Database: %s, User: %s',current_database(),user) db_details;
+-- SELECT current_user,       user,        session_user,       current_database(),       current_catalog,       version();
+
+select column_name,data_type 
+from information_schema.columns 
+where table_name = 'models_data';
