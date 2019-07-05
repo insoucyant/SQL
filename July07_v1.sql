@@ -363,6 +363,7 @@ where variables in (select variables from GBM2019jul) ;
 SELECT * FROM cross2019julGBM;
 --**********************************************************************************
 --**********************************************************************************
+-- This is the intersect code. It sees which models did good in 2018 and as well in the previous years.
 --**********************************************************************************
 --################################################################################################
 select * from base where fym = '2018-07' and model = 'GBM' and variables in 
